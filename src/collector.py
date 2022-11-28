@@ -87,7 +87,7 @@ class Collector:
         "retrieve_date",
     )
     
-    def __init(self):
+    def __init__(self):
         # TODO:
         # Add loading config and last run time for the api counter
         self._api_counter = 0
@@ -219,13 +219,14 @@ class Collector:
             vacancy.get("created_at"),
             vacancy.get("initial_created_at"),
             vacancy.get("alternate_url"),
-            clean_tags(str(vacancy.get("description") or "")),
+            self.clean_tags(str(vacancy.get("description") or "")),
             resps,
             date.today().isoformat()
         )
 
     
-    def collect_vacancies(query: Optional[Dict],
+    def collect_vacancies(self,
+                      query: Optional[Dict],
                       existing_ids: Optional[List],
                       refresh: bool = False,
                       responses: bool = False,
@@ -286,7 +287,7 @@ class Collector:
         num_pages = http.get(target_url).json().get("pages")
         if num_pages is None:
             return result, 1
-
+        
         # Collect vacancy IDs...
         ids = []
         resps = []
@@ -301,13 +302,13 @@ class Collector:
             resps.extend(x.get('counters', {}).get('responses') for x in data["items"])
 
         ids = list(set(ids) - set(existing_ids))
-
+        
         # Collect vacancies...
         jobs_list = []
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             if progress_info:
                 for vacancy in tqdm(
-                    executor.map(get_vacancy, ids, resps),
+                    executor.map(self.get_vacancy, ids, resps),
                     desc="Get data via HH API",
                     ncols=100,
                     total=len(ids),
@@ -315,20 +316,23 @@ class Collector:
                     jobs_list.append(vacancy)
                     self._api_counter+=1
             else:
-                for vacancy in executor.map(get_vacancy, ids, resps):
+                for vacancy in executor.map(self.get_vacancy, ids, resps):
                     jobs_list.append(vacancy)
                     self._api_counter+=1
-
         unzipped_list = list(zip(*jobs_list))
 
         if len(unzipped_list) > 0:
-            for idx, key in enumerate(__DICT_KEYS):
+            for idx, key in enumerate(self.__DICT_KEYS):
                 result[key] = unzipped_list[idx]
             pickle.dump(result, open(cache_file, "wb"))
 
         return result
     
-    def retrieve_queries(query_texts, query_date, refresh = True, progress_info = True):
+    def retrieve_queries(self,
+                         query_texts,
+                         query_date,
+                         refresh = True,
+                         progress_info = True):
         """
         Retrieve data for the list of queries for the certain date.    
         Data is saved to f"../data/download/{query_date}_{query_texts[query_id]}.csv" as CSV files.
@@ -343,7 +347,9 @@ class Collector:
         bool
             True if all the data retrieved, False if API limit reached
         """
-        # TODO: add counter reset, and pause depending on the last download time?
+        # TODO: 
+        # * add counter reset, and pause depending on the last download time?
+        # * add saving to DB
         
         # local counters
         downloaded_counter = 0
@@ -370,7 +376,7 @@ class Collector:
                 existing_ids = []
             vacancies_data = []
             for i in range(1, 25):
-                temp_data = collect_vacancies(
+                temp_data = self.collect_vacancies(
                         query={"text": query_texts[query_id],
                                "per_page": 50,
                                "date_from": timelist[i-1],
@@ -381,12 +387,10 @@ class Collector:
                         refresh=refresh,
                         progress_info=progress_info,
                     )
-                vacancies_data.append(pd.DataFrame(temp_data[0]))
-                downloaded_counter += temp_data[1]
-                self._api_counter += temp_data[1]
+                vacancies_data.append(pd.DataFrame(temp_data))
                 if self._api_counter >= self.__API_HOURLY_LIMIT:
                     break
-            # combine daily data into the dataframe, remove duplicates and ave it
+            # combine daily data into the dataframe, remove duplicates and save it
             vacancies_df_new = pd.concat(vacancies_data)
             vacancies_df = pd.concat([vacancies_df, vacancies_df_new])
             if vacancies_df.shape[0] == 0:
@@ -397,9 +401,21 @@ class Collector:
             vacancies_df['query'] = query_texts[query_id]
             vacancies_df.to_csv(f"../data/download/{query_date}_{query_texts[query_id]}.csv",index=False)
             if self._api_counter >= self.__API_HOURLY_LIMIT:
-                print(f"API download limit reached, downloaded {downloaded_counter} vacancies for {query_date}")
+                print(f"API download limit reached, downloaded {self._api_counter} vacancies for {query_date}")
                 return False
-        print(f"Downloaded all {downloaded_counter} vacancies for {query_date}")
+        print(f"Downloaded all {self._api_counter} vacancies for {query_date}")
         if dropped_counter > 0:
             print(f"Removed nulls: {dropped_counter}")
         return True
+
+# Test
+if __name__ == "__main__":
+    dc = Collector()
+
+    result = dc.retrieve_queries(
+               ['Python tester'],
+               (date.today() - td(days = 1)).isoformat(),
+               refresh=True,
+               progress_info=True,
+    )
+    print(result)
