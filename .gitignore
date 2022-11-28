@@ -7,3 +7,6 @@ data
 # Jupyter Notebook
 .ipynb_checkpoints
 */.ipynb_checkpoints/*
+notebooks/.ipynb_checkpoints/collection-checkpoint.ipynb
+
+notebooks/.ipynb_checkpoints/exploration-checkpoint.ipynb
